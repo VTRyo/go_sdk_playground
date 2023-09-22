@@ -1,40 +1,52 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/sts"
 	"os"
 )
 
 func main() {
+	var bucket, key string
 	var profile string
 	flag.StringVar(&profile, "p", "default", "profile name")
+	flag.StringVar(&bucket, "b", "sandbox", "bucket name")
+	flag.StringVar(&key, "k", "test", "key name")
 	flag.Parse()
 
-	sess, err := session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable, // Must be set to enable
-		Profile:           profile,                    // input "-p profile_name"
-	})
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithSharedConfigProfile(profile)) // context.TODO() こには空の可能性がある他のコンテキストがあるはずだが、適切な値がまだわからないため
 	if err != nil {
 		fmt.Println("error:", err)
 		os.Exit(1)
 	}
 
-	client := sts.New(sess)
+	client := s3.NewFromConfig(cfg)
 
-	identity, err := client.GetCallerIdentity(&sts.GetCallerIdentityInput{})
+	file, err := os.Open("./tmp/information_schema.csv")
 	if err != nil {
-		fmt.Println("error:", err)
-		os.Exit(1)
+		fmt.Println("Failed to open file", err)
+		return
+	}
+	defer file.Close()
+
+	input := &s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+		Body:   file,
 	}
 
-	fmt.Printf(
-		"Account: %s\n, Arn: %s\n, UserId: %s\n",
-		aws.StringValue(identity.Account),
-		aws.StringValue(identity.UserId),
-		aws.StringValue(identity.Arn),
-	)
+	uploader := manager.NewUploader(client)
+	_, err = uploader.Upload(context.TODO(), input)
+	if err != nil {
+		fmt.Println("Failed to upload file", err)
+		return
+	}
+
+	fmt.Printf("successfully uploaded file to %s/%s\n", bucket, key)
+
 }
